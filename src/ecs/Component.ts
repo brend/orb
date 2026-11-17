@@ -2,43 +2,50 @@ import { Entity } from "./Entity.js";
 
 export type ComponentConstructor<T> = new (...args: any[]) => T;
 
-// class ComponentRegistry {
-//     private nextId = 0;
-//     private ids = new Map<Function, number>();
-
-//     getId<T>(component: ComponentConstructor<T>): number {
-//         let id = this.ids.get(component);
-
-//         if (id === undefined) {
-//             id = this.nextId++;
-//             this.ids.set(component, id);
-//         }
-
-//         return id;
-//     }
-// }
-
 export class ComponentPool<T> {
-    readonly components: T[] = [];
-    readonly entities: Entity[] = [];
-    readonly sparse: number[] = [];
+  readonly components: (T | undefined)[] = [];
+  readonly entities: Entity[] = [];
+  readonly sparse: (number | undefined)[] = [];
 
-    add(e: Entity, component: T): void {
-        this.sparse[e] = this.components.length;
-        this.components.push(component);
-        this.entities.push(e);
+  add(e: Entity, component: T): void {
+    if (this.has(e)) {
+      this.components[this.sparse[e]!] = component;
+    } else {
+      this.sparse[e] = this.components.length;
+      this.components.push(component);
+      this.entities.push(e);
+    }
+  }
+
+  remove(e: Entity): void {
+    const entityIndex = this.entities.indexOf(e);
+    if (entityIndex < 0) return;
+    const componentIndex = this.sparse[e]!;
+
+    const lastComponent = this.components.pop();
+
+    if (componentIndex < this.components.length) {
+      const entityInLastSlot = this.sparse.indexOf(this.components.length);
+      this.components[componentIndex] = lastComponent;
+      this.sparse[entityInLastSlot] = componentIndex;
     }
 
-    get(e: Entity): T {
-        return this.components[this.sparse[e]];
-    }
+    this.sparse[e] = undefined;
+    this.entities.splice(entityIndex, 1);
+  }
 
-    has(e: Entity): boolean {
-        return this.entities.indexOf(e) >= 0;
-    }
-};
+  get(e: Entity): T | undefined {
+    const i = this.sparse[e];
+    if (i === undefined) return undefined;
+    return this.components[i];
+  }
+
+  has(e: Entity): boolean {
+    return this.sparse[e] !== undefined;
+  }
+}
 
 export interface TypeErasedComponentPool {
-    add: (e: Entity, component: unknown) => void;
-    get: (e: Entity) => unknown;
-};
+  add: (e: Entity, component: unknown) => void;
+  get: (e: Entity) => unknown;
+}
