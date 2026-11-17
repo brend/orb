@@ -16,9 +16,11 @@
   ],
   "scripts": {
     "build": "tsc",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "start": "tsx src/main.ts"
   },
   "devDependencies": {
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "license": "MIT"

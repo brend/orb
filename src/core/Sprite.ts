@@ -1,6 +1,6 @@
 import { loadImage } from "../utils/utils.assets.js";
 
-export class Entity {
+export class Sprite {
   frameCount: number;
   x: number;
   y: number;
@@ -84,7 +84,7 @@ export class Entity {
     }
   }
 
-  intersectsWith(other: Entity) {
+  intersectsWith(other: Sprite) {
     return !(
       other.x > this.x + this.w ||
       other.x + other.w < this.x ||

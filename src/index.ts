@@ -1,4 +1,4 @@
-export { Entity } from "./core/Entity.js";
+export { Sprite } from "./core/Sprite.js";
 export { Timer } from "./core/Timer.js";
 export { Engine } from "./engine/Engine.js";
 export { Scene } from "./engine/Scene.js";
