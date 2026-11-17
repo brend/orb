@@ -1,6 +1,6 @@
 {
   "name": "@waldrumpus/orb",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reusable utilities for TypeScript games",
   "type": "module",
   "main": "./dist/index.js",
@@ -15,10 +15,13 @@
     "dist"
   ],
   "scripts": {
+    "test": "npm run build && tsc -p tests/tsconfig.json && node --test tests/*.test.mjs",
     "build": "tsc",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "start": "tsx src/main.ts"
   },
   "devDependencies": {
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "license": "MIT"
