@@ -3,49 +3,51 @@ import { Entity } from "./Entity.js";
 export type ComponentConstructor<T> = new (...args: any[]) => T;
 
 export class ComponentPool<T> {
-  readonly components: (T | undefined)[] = [];
+  readonly components: T[] = [];
   readonly entities: Entity[] = [];
   readonly sparse: (number | undefined)[] = [];
 
   add(e: Entity, component: T): void {
-    if (this.has(e)) {
-      this.components[this.sparse[e]!] = component;
-    } else {
-      this.sparse[e] = this.components.length;
+    const i = this.sparse[e.slot];
+
+    if (i === undefined) {
+      this.sparse[e.slot] = this.components.length;
       this.components.push(component);
       this.entities.push(e);
+    } else {
+      if (this.entities[i] !== e)
+        throw new Error(
+          "internal error: attempting to replace component of different entity",
+        );
+      this.components[i] = component;
     }
   }
 
   remove(e: Entity): void {
-    const entityIndex = this.entities.indexOf(e);
-    if (entityIndex < 0) return;
-    const componentIndex = this.sparse[e]!;
+    const i = this.sparse[e.slot];
 
-    const lastComponent = this.components.pop();
+    if (i === undefined || this.entities[i] !== e) return;
 
-    if (componentIndex < this.components.length) {
-      const entityInLastSlot = this.sparse.indexOf(this.components.length);
-      this.components[componentIndex] = lastComponent;
-      this.sparse[entityInLastSlot] = componentIndex;
+    const lastEntity = this.entities.pop()!;
+    const lastComponent = this.components.pop()!;
+
+    if (i < this.components.length) {
+      this.entities[i] = lastEntity;
+      this.components[i] = lastComponent;
+      this.sparse[lastEntity.slot] = i;
     }
 
-    this.sparse[e] = undefined;
-    this.entities.splice(entityIndex, 1);
+    this.sparse[e.slot] = undefined;
   }
 
   get(e: Entity): T | undefined {
-    const i = this.sparse[e];
-    if (i === undefined) return undefined;
+    const i = this.sparse[e.slot];
+    if (i === undefined || this.entities[i] !== e) return undefined;
     return this.components[i];
   }
 
   has(e: Entity): boolean {
-    return this.sparse[e] !== undefined;
+    const i = this.sparse[e.slot];
+    return i !== undefined && this.entities[i] === e;
   }
-}
-
-export interface TypeErasedComponentPool {
-  add: (e: Entity, component: unknown) => void;
-  get: (e: Entity) => unknown;
 }

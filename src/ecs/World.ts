@@ -10,9 +10,15 @@ export class World {
     return this.entities.create();
   }
 
+  isAlive(e: Entity): boolean {
+    return this.entities.isAlive(e);
+  }
+
   destroy(e: Entity): void {
     if (this.isIterating)
       throw new Error("cannot use this method while iteration is in progress");
+    if (!this.entities.isAlive(e))
+      throw new Error("attempting to destroy an already dead entity");
     this.entities.destroy(e);
     for (const pool of this.pools.values()) {
       pool.remove(e);
@@ -31,11 +37,15 @@ export class World {
   }
 
   add<T extends object>(e: Entity, component: T): void {
+    if (!this.entities.isAlive(e))
+      throw new Error("attempted to add an entity that is not alive");
     const type = component.constructor as ComponentConstructor<T>;
     this.getPool(type).add(e, component);
   }
 
   get<T>(e: Entity, type: ComponentConstructor<T>): T | undefined {
+    if (!this.entities.isAlive(e))
+      throw new Error("attempting to get a dead entity");
     return this.getPool(type).get(e);
   }
 
@@ -68,8 +78,9 @@ export class World {
     p2: ComponentPool<V>,
     f: (e: Entity, u: U, v: V) => void,
   ): void {
-    for (const e of p1.entities) {
-      const c1 = p1.get(e)!;
+    for (let i = 0; i < p1.entities.length; ++i) {
+      const e = p1.entities[i];
+      const c1 = p1.components[i];
       const c2 = p2.get(e);
 
       if (c2) {

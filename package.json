@@ -1,6 +1,6 @@
 {
   "name": "@waldrumpus/orb",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Reusable utilities for TypeScript games",
   "type": "module",
   "main": "./dist/index.js",
