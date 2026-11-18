@@ -4,4 +4,4 @@ export { Engine } from "./engine/Engine.js";
 export { Scene } from "./engine/Scene.js";
 export { VoicePlayer } from "./engine/VoicePlayer.js";
 export { World } from "./ecs/World.js";
-export { Entity } from "./ecs/Entity.js";
+export type { Entity } from "./ecs/Entity.js";

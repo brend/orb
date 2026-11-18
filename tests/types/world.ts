@@ -9,3 +9,10 @@ health.hp;
 if (health !== undefined) {
   const hp: number = health.hp;
 }
+
+// Entities are opaque handles, not numbers.
+const entity = world.create();
+// @ts-expect-error A number is not an Entity.
+world.get(0, Health);
+// @ts-expect-error An Entity is not a number.
+const n: number = entity;

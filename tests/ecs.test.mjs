@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { World } from '../dist/index.js';
 import { ComponentPool } from '../dist/ecs/Component.js';
+import { EntityManager } from '../dist/ecs/Entity.js';
 
 class Position { constructor(x = 0) { this.x = x; } }
 class Health { constructor(hp = 10) { this.hp = hp; } }
@@ -46,12 +47,80 @@ test('double destruction cannot allocate the same live ID twice', () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
-test('destroying never-allocated IDs does not corrupt future allocation', () => {
+test('destroying foreign or forged handles does not corrupt allocation', () => {
   const world = new World();
-  world.destroy(0);
+  const own = world.create();
+  world.add(own, new Position());
+  const foreign = new World().create();
+  world.destroy(foreign);
+  world.destroy({ slot: 0, generation: 0 });
   world.destroy(5);
+  assert.ok(world.get(own, Position));
   const ids = Array.from({ length: 10 }, () => world.create());
-  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(new Set([own, ...ids].map(id => id.slot)).size, ids.length + 1);
+});
+
+test('stale handles never alias the entity recycled into their slot', () => {
+  const world = new World();
+  const stale = world.create();
+  world.add(stale, new Position(1));
+  world.destroy(stale);
+  const fresh = world.create();
+  assert.equal(fresh.slot, stale.slot);
+  assert.notEqual(fresh.generation, stale.generation);
+  const position = new Position(2);
+  world.add(fresh, position);
+  assert.equal(world.get(stale, Position), undefined);
+  assert.equal(world.get(fresh, Position), position);
+  world.destroy(stale);
+  assert.equal(world.get(fresh, Position), position);
+});
+
+test('adding to a destroyed handle throws and leaves no orphan component', () => {
+  const world = new World();
+  const stale = world.create();
+  world.destroy(stale);
+  assert.throws(() => world.add(stale, new Position()), /not alive/);
+  assert.equal(world.get(stale, Position), undefined);
+  const fresh = world.create();
+  assert.equal(fresh.slot, stale.slot);
+  const position = new Position(3);
+  world.add(fresh, position);
+  assert.deepEqual(matching(world), [[fresh, position, position]]);
+});
+
+test('adding to a stale handle does not disturb the recycled entity', () => {
+  const world = new World();
+  const stale = world.create();
+  world.destroy(stale);
+  const fresh = world.create();
+  const position = new Position(1);
+  world.add(fresh, position);
+  assert.throws(() => world.add(stale, new Position(2)), /not alive/);
+  assert.equal(world.get(fresh, Position), position);
+  assert.deepEqual(matching(world), [[fresh, position, position]]);
+});
+
+test('adding to foreign or forged handles throws', () => {
+  const world = new World();
+  const own = world.create();
+  const foreign = new World().create();
+  assert.throws(() => world.add(foreign, new Position()), /not alive/);
+  assert.throws(() => world.add({ slot: own.slot, generation: own.generation }, new Position()), /not alive/);
+  assert.throws(() => world.add(0, new Position()), /not alive/);
+  assert.equal(world.get(own, Position), undefined);
+  assert.deepEqual(matching(world), []);
+});
+
+test('destroying a stale handle during iteration is still rejected by the guard', () => {
+  const world = new World();
+  const stale = world.create();
+  world.destroy(stale);
+  const id = world.create();
+  world.add(id, new Position());
+  world.each(Position, Position, () => {
+    assert.throws(() => world.destroy(stale), /iteration is in progress/);
+  });
 });
 
 test('duplicate additions replace the component without duplicating query rows', () => {
@@ -85,53 +154,102 @@ for (const extra of [Position, Health, null]) {
   });
 }
 
-test('removing a component clears membership and allows re-addition', () => {
+function makePool(count) {
+  const manager = new EntityManager();
   const pool = new ComponentPool();
-  pool.add(7, new Position());
-  pool.remove(7);
-  assert.equal(pool.has(7), false);
-  assert.equal(pool.get(7), undefined);
-  pool.add(7, new Position(2));
-  assert.equal(pool.has(7), true);
-  assert.equal(pool.get(7).x, 2);
-  assert.deepEqual(pool.entities, [7]);
+  const handles = Array.from({ length: count }, () => manager.create());
+  return { manager, pool, handles };
+}
+
+test('removing a component clears membership and allows re-addition', () => {
+  const { pool, handles: [e] } = makePool(1);
+  pool.add(e, new Position());
+  pool.remove(e);
+  assert.equal(pool.has(e), false);
+  assert.equal(pool.get(e), undefined);
+  assert.equal(pool.sparse[e.slot], undefined);
+  pool.add(e, new Position(2));
+  assert.equal(pool.has(e), true);
+  assert.equal(pool.get(e).x, 2);
+  assert.deepEqual(pool.entities, [e]);
 });
 
 test('single-entity churn releases component slots and object references', () => {
-  const pool = new ComponentPool();
+  const { pool, handles: [e] } = makePool(1);
   for (let i = 0; i < 10000; i++) {
-    pool.add(0, new Position(i));
-    pool.remove(0);
+    pool.add(e, new Position(i));
+    pool.remove(e);
     assert.equal(pool.components.length, 0);
     assert.equal(pool.entities.length, 0);
   }
 });
 
+test('adding to an existing handle replaces in place without growing storage', () => {
+  const { pool, handles: [a, b] } = makePool(2);
+  pool.add(a, new Position(1));
+  pool.add(b, new Position(2));
+  const replacement = new Position(3);
+  pool.add(a, replacement);
+  assert.equal(pool.get(a), replacement);
+  assert.deepEqual(pool.entities, [a, b]);
+  assert.equal(pool.components.length, 2);
+});
+
+test('adding a different handle on an occupied slot throws before modifying storage', () => {
+  const { manager, pool, handles: [stale] } = makePool(1);
+  const original = new Position(1);
+  pool.add(stale, original);
+  manager.destroy(stale);
+  const fresh = manager.create();
+  assert.equal(fresh.slot, stale.slot);
+  assert.throws(() => pool.add(fresh, new Position(2)), /different entity/);
+  assert.deepEqual(pool.entities, [stale]);
+  assert.deepEqual(pool.components, [original]);
+  assert.equal(pool.sparse[stale.slot], 0);
+  assert.equal(pool.has(fresh), false);
+  assert.equal(pool.get(stale), original);
+});
+
+test('removing with a stale handle leaves the live entry untouched', () => {
+  const { manager, pool, handles: [stale] } = makePool(1);
+  const fresh = (manager.destroy(stale), manager.create());
+  const position = new Position();
+  pool.add(fresh, position);
+  pool.remove(stale);
+  assert.equal(pool.get(fresh), position);
+  assert.deepEqual(pool.entities, [fresh]);
+});
+
 for (const order of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
   test(`removal order ${order} preserves survivors and compact storage`, () => {
-    const pool = new ComponentPool();
-    const expected = new Map([0, 1, 2].map(id => [id, new Position(id)]));
-    for (const [id, component] of expected) pool.add(id, component);
-    for (const id of order) {
-      pool.remove(id);
-      expected.delete(id);
-      assert.equal(pool.has(id), false);
-      assert.equal(pool.get(id), undefined);
+    const { pool, handles } = makePool(3);
+    const expected = new Map(handles.map((h, i) => [i, new Position(i)]));
+    handles.forEach((h, i) => pool.add(h, expected.get(i)));
+    for (const index of order) {
+      pool.remove(handles[index]);
+      expected.delete(index);
+      assert.equal(pool.has(handles[index]), false);
+      assert.equal(pool.get(handles[index]), undefined);
+      assert.equal(pool.sparse[handles[index].slot], undefined);
       assert.equal(pool.components.length, expected.size);
-      assert.deepEqual([...pool.entities].sort(), [...expected.keys()].sort());
+      assert.equal(pool.entities.length, expected.size);
       for (const [survivor, component] of expected) {
-        assert.equal(pool.get(survivor), component);
+        const handle = handles[survivor];
+        assert.equal(pool.get(handle), component);
+        const i = pool.sparse[handle.slot];
+        assert.equal(pool.entities[i], handle);
+        assert.equal(pool.components[i], component);
       }
     }
   });
 }
 
 test('removing an absent component leaves other components intact', () => {
-  const pool = new ComponentPool();
+  const { pool, handles: [present, absent] } = makePool(2);
   const position = new Position();
-  pool.add(1, position);
-  pool.remove(2);
-  assert.equal(pool.get(1), position);
+  pool.add(present, position);
+  pool.remove(absent);
+  assert.equal(pool.get(present), position);
   assert.equal(pool.components.length, 1);
 });
 
@@ -148,9 +266,10 @@ test('destroy during iteration throws without changing components or allocation'
     visited.push(id);
     assert.throws(() => world.destroy(id), /iteration is in progress/);
   });
-  assert.deepEqual(visited.sort(), ids);
+  assert.deepEqual(visited, ids);
   assert.deepEqual(matching(world, Position, Health).map(([id]) => id), ids);
-  assert.ok(!ids.includes(world.create()), 'rejected destruction must not recycle IDs');
+  const fresh = world.create();
+  assert.ok(!ids.some(id => id.slot === fresh.slot), 'rejected destruction must not recycle slots');
   for (const id of ids) world.destroy(id);
   assert.deepEqual(matching(world, Position, Health), []);
 });
