@@ -1,20 +1,21 @@
 # Regression tests
 
 Run `npm test` from the orb directory. This builds current source, checks the
-public declaration's optional component lookup, then runs Node's built-in test
-runner. No additional dependencies or browser are required.
+public declarations for component lookup and query callbacks, then runs Node's
+built-in test runner. No additional dependencies or browser are required.
 
 Coverage includes destruction, recycled IDs, double destruction, unallocated
-IDs, stale and foreign handles, duplicate component replacement, missing lookups, query argument order,
-membership clearing, storage reclamation, all three-entity removal orders,
-query-time destruction, and linear query traversal. The complexity test counts
-dense-array reads using internal pools rather than unreliable wall-clock timings.
+IDs, stale and foreign handles, duplicate component replacement, missing lookups,
+membership clearing, storage reclamation, and all three-entity removal orders.
+Query coverage includes required and excluded components, callback argument
+order, missing and empty pools, and traversal of the smallest required pool.
+The complexity test counts dense-array reads using internal pools.
 
-Destruction and nested queries on the same world are prohibited during iteration.
+Creation, addition, destruction, removal, and nested queries on the same world
+are prohibited during iteration.
 Tests verify that rejection preserves components and allocation, that callback
 exceptions release the guard, that rejected nested queries leave the outer guard
-active, and that separate worlds remain independent. Destruction after iteration
-is allowed. These tests do not impose a prohibition on creation or addition.
+active, and that separate worlds remain independent.
 
 The earlier orbtest movement and missing-script findings belong to the game,
 not this package. These tests do not depend on a sibling orbtest checkout.

@@ -6,10 +6,13 @@ import { EntityManager } from '../dist/ecs/Entity.js';
 
 class Position { constructor(x = 0) { this.x = x; } }
 class Health { constructor(hp = 10) { this.hp = hp; } }
+class Velocity {}
+class Sleeping {}
+class Frozen {}
 
 function matching(world, first = Position, second = Position) {
   const result = [];
-  world.each(first, second, (id, a, b) => result.push([id, a, b]));
+  world.each([first, second], (id, a, b) => result.push([id, a, b]));
   return result;
 }
 
@@ -45,6 +48,21 @@ test('double destruction cannot allocate the same live ID twice', () => {
   world.destroy(id);
   const ids = Array.from({ length: 10 }, () => world.create());
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test('isAlive rejects a foreign handle whose slot exists locally', () => {
+  const world = new World();
+  const own = world.create();
+  const foreign = new World().create();
+  assert.equal(foreign.slot, own.slot);
+  assert.equal(world.isAlive(own), true);
+  assert.equal(world.isAlive(foreign), false);
+});
+
+test('isAlive rejects a foreign handle whose slot does not exist locally', () => {
+  const world = new World();
+  const foreign = new World().create();
+  assert.equal(world.isAlive(foreign), false);
 });
 
 test('destroying foreign or forged handles does not corrupt allocation', () => {
@@ -101,6 +119,26 @@ test('adding to a stale handle does not disturb the recycled entity', () => {
   assert.deepEqual(matching(world), [[fresh, position, position]]);
 });
 
+test('add rechecks liveness after a component constructor getter recycles the slot', () => {
+  const world = new World();
+  const stale = world.create();
+  let fresh;
+  const component = {
+    get constructor() {
+      world.destroy(stale);
+      fresh = world.create();
+      return Position;
+    },
+  };
+
+  assert.throws(() => world.add(stale, component), /not alive/);
+  assert.equal(fresh?.slot, stale.slot);
+  assert.deepEqual(matching(world), []);
+  const position = new Position();
+  world.add(fresh, position);
+  assert.deepEqual(matching(world), [[fresh, position, position]]);
+});
+
 test('adding to foreign or forged handles throws', () => {
   const world = new World();
   const own = world.create();
@@ -118,7 +156,7 @@ test('destroying a stale handle during iteration is still rejected by the guard'
   world.destroy(stale);
   const id = world.create();
   world.add(id, new Position());
-  world.each(Position, Position, () => {
+  world.each([Position, Position], () => {
     assert.throws(() => world.destroy(stale), /iteration is in progress/);
   });
 });
@@ -153,6 +191,95 @@ for (const extra of [Position, Health, null]) {
     assert.deepEqual(matching(world, Position, Health), [[id, position, health]]);
   });
 }
+
+test('array queries support one or more required components and exclude any listed type', () => {
+  const world = new World();
+  const awake = world.create();
+  const asleep = world.create();
+  const stationary = world.create();
+  const position = new Position();
+  const velocity = new Velocity();
+  const health = new Health();
+  world.add(awake, position);
+  world.add(awake, velocity);
+  world.add(awake, health);
+  world.add(asleep, new Position());
+  world.add(asleep, new Velocity());
+  world.add(asleep, new Health());
+  world.add(asleep, new Sleeping());
+  world.add(stationary, new Position());
+  const positioned = [];
+  world.each([Position], (id) => positioned.push(id));
+  assert.deepEqual(positioned, [awake, asleep, stationary]);
+
+  const moving = [];
+  world.each([Health, Position, Velocity], (id, hp, pos, speed) => {
+    moving.push([id, hp, pos, speed]);
+  }, { without: [Frozen, Sleeping] });
+  assert.deepEqual(moving, [[awake, health, position, velocity]]);
+
+  world.each([Position, Frozen], () => assert.fail('required component is missing'));
+  assert.equal(world.pools.has(Frozen), false);
+});
+
+test('queries skip candidates that are missing any required component', () => {
+  const world = new World();
+  const [complete] = [
+    [Position, Velocity, Health],
+    [Position, Velocity],
+    [Position, Health],
+    [Velocity, Health],
+  ].map(types => {
+    const id = world.create();
+    for (const Type of types) world.add(id, new Type());
+    return id;
+  });
+
+  const matches = [];
+  world.each([Position, Velocity, Health], id => matches.push(id));
+  assert.deepEqual(matches, [complete]);
+});
+
+test('each excluded type blocks a match and later queries see membership changes', () => {
+  const world = new World();
+  const [awake, asleep, frozen] = Array.from({ length: 3 }, () => {
+    const id = world.create();
+    world.add(id, new Position());
+    return id;
+  });
+  const sleeping = new Sleeping();
+  world.add(asleep, sleeping);
+  world.add(frozen, new Frozen());
+
+  const options = { without: [Sleeping, Frozen] };
+  const matches = () => {
+    const ids = [];
+    world.each([Position], id => ids.push(id), options);
+    return ids;
+  };
+
+  assert.deepEqual(matches(), [awake]);
+  world.remove(asleep, sleeping);
+  world.add(awake, new Sleeping());
+  assert.deepEqual(matches(), [asleep]);
+});
+
+test('missing and empty required pools both release the iteration guard', () => {
+  const world = new World();
+  const id = world.create();
+  const position = new Position();
+  const health = new Health();
+  world.add(id, position);
+
+  assert.deepEqual(matching(world, Position, Health), []);
+  world.add(id, health);
+  assert.deepEqual(matching(world, Position, Health), [[id, position, health]]);
+
+  world.remove(id, health);
+  assert.deepEqual(matching(world, Position, Health), []);
+  world.add(id, health);
+  assert.deepEqual(matching(world, Position, Health), [[id, position, health]]);
+});
 
 function makePool(count) {
   const manager = new EntityManager();
@@ -253,7 +380,7 @@ test('removing an absent component leaves other components intact', () => {
   assert.equal(pool.components.length, 1);
 });
 
-test('destroy during iteration throws without changing components or allocation', () => {
+test('structural changes during iteration throw without changing components or allocation', () => {
   const world = new World();
   const ids = Array.from({ length: 4 }, () => {
     const id = world.create();
@@ -262,14 +389,18 @@ test('destroy during iteration throws without changing components or allocation'
     return id;
   });
   const visited = [];
-  world.each(Position, Health, id => {
+  world.each([Position, Health], (id, position) => {
     visited.push(id);
+    assert.throws(() => world.create(), /iteration is in progress/);
+    assert.throws(() => world.add(id, new Position()), /iteration is in progress/);
     assert.throws(() => world.destroy(id), /iteration is in progress/);
+    assert.throws(() => world.remove(id, position), /iteration is in progress/);
+    assert.equal(world.get(id, Position), position);
   });
   assert.deepEqual(visited, ids);
   assert.deepEqual(matching(world, Position, Health).map(([id]) => id), ids);
   const fresh = world.create();
-  assert.ok(!ids.some(id => id.slot === fresh.slot), 'rejected destruction must not recycle slots');
+  assert.equal(fresh.slot, ids.length);
   for (const id of ids) world.destroy(id);
   assert.deepEqual(matching(world, Position, Health), []);
 });
@@ -279,7 +410,7 @@ test('an uncaught destruction error releases the iteration guard', () => {
   const id = world.create();
   const position = new Position();
   world.add(id, position);
-  assert.throws(() => world.each(Position, Position, () => world.destroy(id)),
+  assert.throws(() => world.each([Position, Position], () => world.destroy(id)),
     /iteration is in progress/);
   assert.deepEqual(matching(world), [[id, position, position]]);
   world.destroy(id);
@@ -291,7 +422,7 @@ test('an arbitrary callback exception propagates and releases the iteration guar
   const id = world.create();
   world.add(id, new Position());
   const error = new Error('callback failure');
-  assert.throws(() => world.each(Position, Position, () => { throw error; }),
+  assert.throws(() => world.each([Position, Position], () => { throw error; }),
     actual => actual === error);
   assert.equal(matching(world).length, 1);
   world.destroy(id);
@@ -301,7 +432,7 @@ test('a rejected nested query does not release the outer iteration guard', () =>
   const world = new World();
   const id = world.create();
   world.add(id, new Position());
-  world.each(Position, Position, () => {
+  world.each([Position, Position], () => {
     assert.throws(() => matching(world), /iteration is in progress/);
     assert.throws(() => world.destroy(id), /iteration is in progress/);
   });
@@ -315,22 +446,24 @@ test('iteration guards are independent between worlds', () => {
   first.add(first.create(), new Position());
   const id = second.create();
   second.add(id, new Position());
-  first.each(Position, Position, () => {
+  first.each([Position, Position], () => {
     assert.equal(matching(second).length, 1);
     second.destroy(id);
   });
   assert.deepEqual(matching(second), []);
 });
 
-test('query array reads grow linearly rather than scanning membership per entity', () => {
+test('query array reads scale with the smallest required pool', () => {
   // White-box operation count avoids machine-dependent timing thresholds.
   // Instrument dense arrays only after setup so this measures query work.
   const world = new World();
   const size = 256;
+  const velocity = new Velocity();
   for (let i = 0; i < size; i++) {
     const id = world.create();
     world.add(id, new Position());
     world.add(id, new Health());
+    if (i === 0) world.add(id, velocity);
   }
   let reads = 0;
   for (const pool of world.pools.values()) {
@@ -344,4 +477,10 @@ test('query array reads grow linearly rather than scanning membership per entity
   assert.equal(matching(world, Position, Health).length, size);
   assert.equal(matching(world).length, size);
   assert.ok(reads <= 10 * size, `Expected linear array reads, got ${reads}`);
+
+  reads = 0;
+  const speeds = [];
+  world.each([Position, Velocity, Health], (id, position, speed) => speeds.push(speed));
+  assert.deepEqual(speeds, [velocity]);
+  assert.ok(reads <= 12, `Expected few array reads with one candidate, got ${reads}`);
 });
