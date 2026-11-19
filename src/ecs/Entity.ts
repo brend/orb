@@ -60,6 +60,6 @@ export class EntityManager {
   }
 
   isAlive(e: Entity): boolean {
-    return e != null && e === this.slots[e.slot].handle;
+    return e != null && e === this.slots[e.slot]?.handle;
   }
 }

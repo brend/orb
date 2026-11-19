@@ -47,6 +47,21 @@ test('double destruction cannot allocate the same live ID twice', () => {
   assert.equal(new Set(ids).size, ids.length);
 });
 
+test('isAlive rejects a foreign handle whose slot exists locally', () => {
+  const world = new World();
+  const own = world.create();
+  const foreign = new World().create();
+  assert.equal(foreign.slot, own.slot);
+  assert.equal(world.isAlive(own), true);
+  assert.equal(world.isAlive(foreign), false);
+});
+
+test('isAlive rejects a foreign handle whose slot does not exist locally', () => {
+  const world = new World();
+  const foreign = new World().create();
+  assert.equal(world.isAlive(foreign), false);
+});
+
 test('destroying foreign or forged handles does not corrupt allocation', () => {
   const world = new World();
   const own = world.create();
@@ -98,6 +113,26 @@ test('adding to a stale handle does not disturb the recycled entity', () => {
   world.add(fresh, position);
   assert.throws(() => world.add(stale, new Position(2)), /not alive/);
   assert.equal(world.get(fresh, Position), position);
+  assert.deepEqual(matching(world), [[fresh, position, position]]);
+});
+
+test('add rechecks liveness after a component constructor getter recycles the slot', () => {
+  const world = new World();
+  const stale = world.create();
+  let fresh;
+  const component = {
+    get constructor() {
+      world.destroy(stale);
+      fresh = world.create();
+      return Position;
+    },
+  };
+
+  assert.throws(() => world.add(stale, component), /not alive/);
+  assert.equal(fresh?.slot, stale.slot);
+  assert.deepEqual(matching(world), []);
+  const position = new Position();
+  world.add(fresh, position);
   assert.deepEqual(matching(world), [[fresh, position, position]]);
 });
 

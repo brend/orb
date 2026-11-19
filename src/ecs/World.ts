@@ -17,8 +17,7 @@ export class World {
   destroy(e: Entity): void {
     if (this.isIterating)
       throw new Error("cannot use this method while iteration is in progress");
-    if (!this.entities.isAlive(e))
-      throw new Error("attempting to destroy an already dead entity");
+    if (!this.entities.isAlive(e)) return;
     this.entities.destroy(e);
     for (const pool of this.pools.values()) {
       pool.remove(e);
@@ -39,13 +38,17 @@ export class World {
   add<T extends object>(e: Entity, component: T): void {
     if (!this.entities.isAlive(e))
       throw new Error("attempted to add an entity that is not alive");
+
     const type = component.constructor as ComponentConstructor<T>;
+    // A constructor getter can destroy the entity before add resumes.
+    if (!this.entities.isAlive(e))
+      throw new Error("attempted to add an entity that is not alive");
+
     this.getPool(type).add(e, component);
   }
 
   get<T>(e: Entity, type: ComponentConstructor<T>): T | undefined {
-    if (!this.entities.isAlive(e))
-      throw new Error("attempting to get a dead entity");
+    if (!this.entities.isAlive(e)) return undefined;
     return this.getPool(type).get(e);
   }
 
