@@ -54,6 +54,20 @@ export class World {
     return this.getPool(type).get(e);
   }
 
+  has<T extends object>(e: Entity, component: T): boolean {
+    return (
+      this.entities.isAlive(e) &&
+      this.get(e, component.constructor as ComponentConstructor<T>) != null
+    );
+  }
+
+  remove<T extends object>(e: Entity, component: T): void {
+    if (!this.entities.isAlive(e))
+      throw new Error("attempted to modify a dead entity");
+    const type = component.constructor as ComponentConstructor<T>;
+    this.getPool(type).remove(e);
+  }
+
   private throwIfIterating(): void {
     if (this.isIterating)
       throw new Error("cannot use this method while iteration is in progress");
