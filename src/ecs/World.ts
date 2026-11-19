@@ -7,6 +7,7 @@ export class World {
   private isIterating = false;
 
   create(): Entity {
+    this.throwIfIterating();
     return this.entities.create();
   }
 
@@ -15,8 +16,7 @@ export class World {
   }
 
   destroy(e: Entity): void {
-    if (this.isIterating)
-      throw new Error("cannot use this method while iteration is in progress");
+    this.throwIfIterating();
     if (!this.entities.isAlive(e)) return;
     this.entities.destroy(e);
     for (const pool of this.pools.values()) {
@@ -36,6 +36,8 @@ export class World {
   }
 
   add<T extends object>(e: Entity, component: T): void {
+    this.throwIfIterating();
+
     if (!this.entities.isAlive(e))
       throw new Error("attempted to add an entity that is not alive");
 
@@ -52,14 +54,17 @@ export class World {
     return this.getPool(type).get(e);
   }
 
+  private throwIfIterating(): void {
+    if (this.isIterating)
+      throw new Error("cannot use this method while iteration is in progress");
+  }
+
   each<U, V>(
     c1: ComponentConstructor<U>,
     c2: ComponentConstructor<V>,
     f: (e: Entity, u: U, v: V) => void,
   ): void {
-    if (this.isIterating)
-      throw new Error("cannot use this method while iteration is in progress");
-
+    this.throwIfIterating();
     this.isIterating = true;
 
     try {
