@@ -179,6 +179,22 @@ test('get returns undefined for missing components in empty and populated pools'
   assert.equal(world.get(id, Position), undefined);
 });
 
+test('has checks for a component by constructor or instance', () => {
+  const world = new World();
+  const id = world.create(new Position(1));
+  const position = new Position(2);
+
+  assert.equal(world.has(id, Position), true);
+  assert.equal(world.has(id, position), true);
+  assert.equal(world.has(id, Health), false);
+  assert.equal(world.has(world.create(), Position), false);
+
+  world.destroy(id);
+  world.create(new Position(3));
+  assert.equal(world.has(id, Position), false);
+  assert.equal(world.has(id, position), false);
+});
+
 for (const extra of [Position, Health, null]) {
   test(`query preserves argument order with ${extra?.name ?? 'neither'} pool larger`, () => {
     const world = new World();

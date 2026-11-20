@@ -72,11 +72,16 @@ export class World {
     return this.getPool(type).get(e);
   }
 
-  has<T extends object>(e: Entity, component: T): boolean {
-    return (
-      this.entities.isAlive(e) &&
-      this.get(e, component.constructor as ComponentConstructor<T>) != null
-    );
+  has(e: Entity, type: Constructor): boolean;
+  has<T extends object>(e: Entity, component: T): boolean;
+  has(e: Entity, componentOrType: object): boolean {
+    if (!this.entities.isAlive(e)) return false;
+
+    const type =
+      typeof componentOrType === "function"
+        ? componentOrType
+        : componentOrType.constructor;
+    return this.pools.get(type)?.has(e) ?? false;
   }
 
   remove<T extends object>(e: Entity, component: T): void {
