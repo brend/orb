@@ -12,9 +12,21 @@ export class World {
   private readonly pools = new Map<Function, ComponentPool<any>>();
   private isIterating = false;
 
-  create(): Entity {
+  create(...components: object[]): Entity {
     this.throwIfIterating();
-    return this.entities.create();
+
+    const e = this.entities.create();
+
+    for (const c of components) {
+      try {
+        this.add(e, c);
+      } catch (error) {
+        this.destroy(e);
+        throw error;
+      }
+    }
+
+    return e;
   }
 
   isAlive(e: Entity): boolean {
